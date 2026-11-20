@@ -3,7 +3,7 @@ use anchor_spl::{
     associated_token::AssociatedToken,
     token::{mint_to, transfer, Mint, MintTo, Token, TokenAccount, Transfer},
 };
-use constant_product_curve::ConstantProduct;
+use crate::math::proportional;
 
 use crate::{error::AmmError, state::Config};
 
@@ -72,26 +72,17 @@ impl<'info> Deposit<'info> {
         require!(!self.config.locked, AmmError::PoolLocked);
         require_neq!(amount, 0, AmmError::InvalidAmount);
 
-        let (x, y) =
-            if self.mint_lp.supply == 0 && self.vault_x.amount == 0 && self.vault_y.amount == 0 {
-                (max_x, max_y)
-            } else {
-                let amounts = ConstantProduct::xy_deposit_amounts_from_l(
-                    self.vault_x.amount,
-                    self.vault_y.amount,
-                    self.mint_lp.supply,
-                    amount,
-                    6,
-                )
-                .unwrap();
-
-                require!(
-                    amounts.x <= max_x && amounts.y <= max_y,
-                    AmmError::SlippageExceeded
-                );
-
-                (amounts.x, amounts.y)
-            };
+        let (x, y) = if self.mint_lp.supply == 0 {
+            (max_x, max_y)
+        } else {
+            require!(self.vault_x.amount > 0 && self.vault_y.amount > 0, AmmError::NoLiquidityInPool);
+            (
+                proportional(self.vault_x.amount, amount, self.mint_lp.supply, true)?,
+                proportional(self.vault_y.amount, amount, self.mint_lp.supply, true)?,
+            )
+        };
+        require!(x > 0 && y > 0, AmmError::InvalidAmount);
+        require!(x <= max_x && y <= max_y, AmmError::SlippageExceeded);
 
         // deposit token x
         self.deposit_tokens(true, x)?;

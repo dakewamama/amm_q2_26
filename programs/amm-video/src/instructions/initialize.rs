@@ -4,7 +4,7 @@ use anchor_spl::{
     token::{Mint, Token, TokenAccount},
 };
 
-use crate::state::Config;
+use crate::{error::AmmError, state::Config};
 
 #[derive(Accounts)]
 #[instruction(seed: u64)]
@@ -16,7 +16,15 @@ pub struct Initialize<'info> {
     #[account(
         init,
         payer = initializer,
-        seeds = [b"lp", config.key.as_ref()],
+        seeds = [b"config", seed.to_le_bytes().as_ref()],
+        bump,
+        space = Config::DISCRIMINATOR.len() + Config::INIT_SPACE,
+    )]
+    pub config: Account<'info, Config>,
+    #[account(
+        init,
+        payer = initializer,
+        seeds = [b"lp", config.key().as_ref()],
         bump,
         mint::decimals = 6,
         mint::authority = config,
@@ -28,22 +36,32 @@ pub struct Initialize<'info> {
         associated_token::mint = mint_x,
         associated_token::authority = config,
     )]
-    pub vault_x: Account<'info, TokenAccount>,
+    pub vault_x: Box<Account<'info, TokenAccount>>,
     #[account(
         init,
         payer = initializer,
         associated_token::mint = mint_y,
         associated_token::authority = config,
     )]
-    pub vault_y: Account<'info, TokenAccount>,
+    pub vault_y: Box<Account<'info, TokenAccount>>,
     #[account(
         init,
         payer = initializer,
-        seeds = [b"config", seed.to_le_bytes().as_ref()],
+        seeds = [b"treasury_x", config.key().as_ref()],
         bump,
-        space = Config::DISCRIMINATOR.len() + Config::INIT_SPACE,
+        token::mint = mint_x,
+        token::authority = initializer,
     )]
-    pub config: Account<'info, Config>,
+    pub treasury_x: Box<Account<'info, TokenAccount>>,
+    #[account(
+        init,
+        payer = initializer,
+        seeds = [b"treasury_y", config.key().as_ref()],
+        bump,
+        token::mint = mint_y,
+        token::authority = initializer,
+    )]
+    pub treasury_y: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -57,6 +75,8 @@ impl<'info> Initialize<'info> {
         authority: Option<Pubkey>,
         bumps: InitializeBumps,
     ) -> Result<()> {
+        require!(fee < 10_000, AmmError::InvalidFee);
+        require_keys_neq!(self.mint_x.key(), self.mint_y.key(), AmmError::InvalidToken);
         self.config.set_inner(Config {
             seed,
             authority,

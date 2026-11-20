@@ -39,6 +39,8 @@ pub fn create_initialise_ix(
             vault_x,
             vault_y,
             config,
+            treasury_x: Pubkey::find_program_address(&[b"treasury_x", config.as_ref()], &amm_video::id()).0,
+            treasury_y: Pubkey::find_program_address(&[b"treasury_y", config.as_ref()], &amm_video::id()).0,
             token_program: TOKEN_PROGRAM_ID,
             associated_token_program: ASSOCIATED_TOKEN_PROGRAM_ID,
             system_program: SYSTEM_PROGRAM_ID,

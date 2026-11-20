@@ -3,7 +3,7 @@ use anchor_spl::{
     associated_token::AssociatedToken,
     token::{transfer, Mint, Token, TokenAccount, Transfer},
 };
-use constant_product_curve::{ConstantProduct, LiquidityPair};
+use crate::math::quote;
 
 use crate::{error::AmmError, state::Config};
 
@@ -49,6 +49,10 @@ pub struct Swap<'info> {
         associated_token::authority = user,
     )]
     pub user_y: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"treasury_x", config.key().as_ref()], bump, token::mint = mint_x)]
+    pub treasury_x: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"treasury_y", config.key().as_ref()], bump, token::mint = mint_y)]
+    pub treasury_y: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
     pub associated_token_program: Program<'info, AssociatedToken>,
@@ -56,27 +60,30 @@ pub struct Swap<'info> {
 
 impl<'info> Swap<'info> {
     pub fn swap(&mut self, is_x: bool, amount: u64, min: u64) -> Result<()> {
-        require!(amount > 0, AmmError::InvalidAmount);
-        let mut curve = ConstantProduct::init(
-            self.vault_x.amount,
-            self.vault_y.amount,
-            self.mint_lp.supply,
-            self.config.fee,
-            Some(6),
-        )
-        .unwrap();
-
-        let p = match is_x {
-            true => LiquidityPair::X,
-            false => LiquidityPair::Y,
+        require!(!self.config.locked, AmmError::PoolLocked);
+        require!(self.mint_lp.supply > 0, AmmError::NoLiquidityInPool);
+        let (x, y) = if is_x {
+            (self.vault_x.amount, self.vault_y.amount)
+        } else {
+            (self.vault_y.amount, self.vault_x.amount)
         };
-
-        let swap_result: constant_product_curve::SwapResult = curve
-            .swap(p, amount, min)
-            .map_err(|_| AmmError::SlippageExceeded)?;
-
-        self.deposit_tokens(is_x, swap_result.deposit)?;
-        self.withdraw_tokens(is_x, swap_result.withdraw)
+        let (out, treasury_fee) = quote(x, y, amount, self.config.fee)?;
+        require!(out >= min, AmmError::SlippageExceeded);
+        self.deposit_tokens(is_x, amount - treasury_fee)?;
+        if treasury_fee > 0 {
+            let (from, to) = if is_x {
+                (self.user_x.to_account_info(), self.treasury_x.to_account_info())
+            } else {
+                (self.user_y.to_account_info(), self.treasury_y.to_account_info())
+            };
+            transfer(
+                CpiContext::new(self.token_program.key(), Transfer {
+                    from, to, authority: self.user.to_account_info(),
+                }),
+                treasury_fee,
+            )?;
+        }
+        self.withdraw_tokens(is_x, out)
     }
 
     pub fn deposit_tokens(&mut self, is_x: bool, amount: u64) -> Result<()> {
