@@ -26,12 +26,17 @@ The curve uses integer arithmetic with u128 intermediates, without an external c
 
 ## Build and test
 
+Use Anchor CLI 1.0.1, Agave 3.1.8, and the Rust version pinned in `rust-toolchain.toml`.
+
+Run the build and tests with a program keypair matching the declared ID.
+
 ```bash
-anchor build
-cargo test --workspace
+anchor build && cargo test --workspace
 ```
 
-The LiteSVM tests cover all four instructions, slippage, invalid fees, treasury substitution, both swap directions and reserve balances. Unit tests cover math and rounding. The integration tests require the SBF artifact from `anchor build`.
+On a fresh checkout, use `anchor build --ignore-keys && cargo test --workspace` to run LiteSVM against the declared ID without the deployment keypair. For a disposable local deployment, use `anchor keys sync` first to match the generated local keypair.
+
+The LiteSVM tests cover all four instructions, slippage, invalid fees, substituted accounts, swaps in both directions, and user, reserve, and treasury balances. Unit tests cover math and rounding. The integration tests require the SBF artifact from `anchor build`.
 
 ## Downtime mitigation
 
